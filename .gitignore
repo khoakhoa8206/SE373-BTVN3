@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+# tài liệu môn học và demo giải nén, không phải bài nộp
+demo/
+*.zip
+*.pdf

@@ -1,0 +1,6 @@
+langchain>=1.0
+langchain-core>=1.0
+langgraph>=1.0
+# Chỉ cần khi chạy --that với model thật, chọn một:
+# langchain-anthropic>=1.0
+# langchain-openai>=1.0

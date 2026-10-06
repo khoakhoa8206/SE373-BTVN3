@@ -1,0 +1,337 @@
+<title>Agent đặt vé SGN → DAD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: biển chỉ dẫn sân bay ở đầu trang → bộ chọn kịch bản/mẫu → bảng chuyến + trace từng vòng → ma trận đánh giá */
+:root {
+  --bg: #f2f4f8; --surface: #ffffff; --ink: #14213d; --muted: #586379; --line: #d8dde7;
+  --sign: #f2b705; --sign-ink: #14213d;
+  --ok: #1d7a4b; --bad: #b42318; --warn: #a8530a; --human: #1d4ed8;
+  --f-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1322; --surface: #151d31; --ink: #e5e9f1; --muted: #9aa4b9; --line: #283351;
+  --sign: #f5c542; --sign-ink: #111827;
+  --ok: #5ccb8d; --bad: #f47b72; --warn: #f0a33a; --human: #86a8ff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d1322; --surface: #151d31; --ink: #e5e9f1; --muted: #9aa4b9; --line: #283351;
+  --sign: #f5c542; --sign-ink: #111827;
+  --ok: #5ccb8d; --bad: #f47b72; --warn: #f0a33a; --human: #86a8ff; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--f-body); padding: 24px 16px 56px }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 700; letter-spacing: .01em; margin: 0; text-wrap: balance; line-height: 1.1 }
+h2 { font-size: 1.6rem }
+.label { font-family: var(--f-mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+.mono { font-family: var(--f-mono) }
+.num { font-variant-numeric: tabular-nums }
+
+/* --- biển chỉ dẫn --- */
+.sign { display: grid; grid-template-columns: auto 1fr; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--surface) }
+.sign-route { background: var(--sign); color: var(--sign-ink); padding: 18px 26px; display: grid; align-content: center; gap: 2px }
+.sign-route b { font-family: var(--f-display); font-size: 3rem; line-height: 1; letter-spacing: .02em }
+.sign-route span { font-family: var(--f-mono); font-size: .75rem; letter-spacing: .1em; text-transform: uppercase }
+.sign-body { padding: 18px 22px; display: grid; gap: 10px; min-width: 0 }
+.sign-body h1 { font-size: 2rem }
+.ask { font-size: 1.02rem; color: var(--muted); margin: 0 }
+.chips { display: flex; flex-wrap: wrap; gap: 8px }
+.chip { font-family: var(--f-mono); font-size: .78rem; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap }
+.chip b { font-weight: 600 }
+
+/* --- bộ chọn --- */
+.pickers { display: grid; gap: 14px }
+.scen { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px }
+.scen button, .seg button { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); cursor: pointer; text-align: left }
+.scen button { border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px }
+.scen button .mono { font-size: .8rem; font-weight: 600 }
+.scen button small { color: var(--muted); font-size: .8rem; line-height: 1.35 }
+.scen button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 -3px 0 var(--sign) }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex-wrap: wrap }
+.seg button { border: 0; border-right: 1px solid var(--line); padding: 8px 16px; font-weight: 500 }
+.seg button:last-child { border-right: 0 }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg) }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between }
+button:focus-visible { outline: 2px solid var(--human); outline-offset: 2px }
+.btn { font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer }
+.btn.primary { background: var(--sign); color: var(--sign-ink); border-color: var(--sign) }
+
+/* --- vùng chính --- */
+.main { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0 }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap }
+.scroll { overflow-x: auto }
+table { border-collapse: collapse; width: 100% }
+th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line); white-space: nowrap }
+th { font-family: var(--f-mono); font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400 }
+.board td { font-family: var(--f-mono); font-size: .85rem }
+.board td.fl { font-weight: 600 }
+s { color: var(--muted) }
+.note { font-size: .85rem; color: var(--muted); margin: 0 }
+
+.pill { display: inline-block; font-family: var(--f-mono); font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor }
+.t-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent) }
+.t-bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent) }
+.t-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent) }
+.t-human { color: var(--human); background: color-mix(in srgb, var(--human) 12%, transparent) }
+.t-mute { color: var(--muted) }
+
+/* --- trace --- */
+.trace { list-style: none; margin: 0; padding: 0; display: grid; gap: 0 }
+.trace li { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px dashed var(--line) }
+.trace li:first-child { border-top: 0 }
+.trace .n { font-family: var(--f-mono); font-size: .8rem; color: var(--muted); padding-top: 2px; text-align: right }
+.trace .what { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; min-width: 0 }
+.trace .call { font-family: var(--f-mono); font-size: .85rem; overflow-wrap: anywhere }
+.trace .call b { font-weight: 600 }
+.trace .obs { grid-column: 2; font-family: var(--f-mono); font-size: .74rem; color: var(--muted); overflow-wrap: anywhere }
+.trace .why { grid-column: 2; font-size: .85rem }
+.trace li.plan .what { font-size: .85rem }
+.steps { display: flex; flex-wrap: wrap; gap: 4px; align-items: center }
+.steps span { font-family: var(--f-mono); font-size: .72rem; padding: 2px 7px; border-radius: 4px; background: color-mix(in srgb, var(--sign) 30%, transparent) }
+.steps i { color: var(--muted); font-style: normal; font-size: .75rem }
+.trace li.pending { opacity: .18 }
+.trace li.now { background: color-mix(in srgb, var(--sign) 14%, transparent) }
+
+.outcome { border-radius: 8px; padding: 14px 16px; display: grid; gap: 8px; border: 1px solid currentColor }
+.outcome h3 { font-size: 1.35rem }
+.outcome dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; color: var(--ink) }
+.outcome dt { font-family: var(--f-mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding-top: 2px }
+.outcome dd { margin: 0; font-size: .88rem; overflow-wrap: anywhere }
+.outcome p { margin: 0; color: var(--ink) }
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px }
+.metric { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid }
+.metric b { font-family: var(--f-display); font-size: 1.6rem; line-height: 1.1; font-variant-numeric: tabular-nums }
+
+/* --- ma trận --- */
+.matrix td, .matrix th { white-space: normal }
+.matrix td.cell { cursor: pointer; min-width: 9rem }
+.matrix td.cell:hover { background: color-mix(in srgb, var(--sign) 10%, transparent) }
+.matrix td.cell.sel { box-shadow: inset 0 0 0 2px var(--ink) }
+.matrix .sub { display: block; font-family: var(--f-mono); font-size: .72rem; color: var(--muted); margin-top: 4px }
+.bars { display: grid; gap: 12px }
+.bar { display: grid; grid-template-columns: 9rem minmax(0, 1fr) 5.5rem; gap: 10px; align-items: center }
+.bar .track { height: 12px; background: color-mix(in srgb, var(--line) 60%, transparent); border-radius: 3px; overflow: hidden }
+.bar .fill { height: 100%; background: var(--ink); border-radius: 3px }
+.bar .v { font-family: var(--f-mono); font-size: .8rem; text-align: right }
+.summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px }
+.foot { font-size: .82rem; color: var(--muted); margin: 0 }
+
+@media (max-width: 900px) {
+  .main, .summary { grid-template-columns: minmax(0, 1fr) }
+  .scen { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+}
+@media (max-width: 560px) {
+  .sign { grid-template-columns: minmax(0, 1fr) }
+  .sign-route b { font-size: 2.4rem }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .bar { grid-template-columns: 6rem minmax(0, 1fr) 4.5rem }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+<div class="wrap">
+  <header class="sign">
+    <div class="sign-route"><span>Chuyến một chiều</span><b>SGN → DAD</b><span>07 · 10 · 2026</span></div>
+    <div class="sign-body">
+      <span class="label">SE373 · BTVN#3 · LangChain + LangGraph</span>
+      <h1>Agent đặt vé có harness</h1>
+      <p class="ask" id="ask"></p>
+      <div class="chips" id="chips"></div>
+    </div>
+  </header>
+
+  <section class="pickers" aria-label="Chọn lượt chạy">
+    <div class="scen" id="scen"></div>
+    <div class="row">
+      <div class="seg" id="seg" role="group" aria-label="Mẫu thiết kế"></div>
+      <div class="row">
+        <button class="btn primary" id="play" type="button">Phát lại từng vòng</button>
+        <button class="btn" id="all" type="button">Hiện tất cả</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="main">
+    <div class="panel">
+      <div class="panel-head"><h2>Bảng chuyến</h2><span class="label" id="board-tag"></span></div>
+      <div class="scroll"><table class="board"><thead><tr><th>Chuyến</th><th>Giờ</th><th>Giá</th><th>Hoàn</th><th>Harness xét</th></tr></thead><tbody id="board"></tbody></table></div>
+      <p class="note" id="board-note"></p>
+      <div class="metrics" id="metrics"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2 id="trace-title">Trace</h2><span class="label" id="trace-tag"></span></div>
+      <ol class="trace" id="trace"></ol>
+      <div class="outcome" id="outcome"></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="eval-h">
+    <div class="panel-head"><h2 id="eval-h">Đánh giá 5 kịch bản × 3 mẫu</h2><span class="label">bấm một ô để xem trace</span></div>
+    <div class="scroll"><table class="matrix"><thead><tr><th>Kịch bản</th><th>ReAct</th><th>Plan-then-Execute</th><th>Lai</th></tr></thead><tbody id="matrix"></tbody></table></div>
+    <div class="summary">
+      <div class="bars" id="bars-token"></div>
+      <div class="bars" id="bars-model"></div>
+    </div>
+    <p class="foot">Số liệu lấy từ <span class="mono">python btvn3_dat_ve.py --danh-gia</span>, chạy với model giả lập. Token ước lượng bằng số ký tự chia 4 trên toàn bộ input gửi model.</p>
+  </section>
+</div>
+
+<script>
+const D = {"cau_hoi": "Đặt giúp tôi vé SGN → DAD ngày 07/10/2026, cất cánh trước 12:00, giá dưới 2.000.000đ.", "rb": {"origin": "SGN", "dest": "DAD", "date": "2026-10-07", "depart_before": "12:00", "max_price": 2000000}, "han_muc": 1900000, "chuyen": {"QH118": {"depart": "15:40", "price": 1640000, "refundable": true}, "VJ604": {"depart": "06:05", "price": 1390000, "refundable": false}, "VN122": {"depart": "08:10", "price": 1850000, "refundable": true}, "VN126": {"depart": "11:20", "price": 1880000, "refundable": true}, "VN124": {"depart": "10:30", "price": 2150000, "refundable": true}}, "kich_ban": {"chuan": {"chuyen": ["QH118", "VN122", "VN124"]}, "doi_gia": {"chuyen": ["QH118", "VN122", "VN126", "VN124"], "gia_moi": {"VN122": 2050000}}, "can_duyet": {"chuyen": ["QH118", "VJ604", "VN124"]}, "loi_dich_vu": {"chuyen": ["QH118", "VN122", "VN124"], "timeout": true}, "ngan_sach": {"chuyen": ["QH118", "VN122", "VN126", "VN124"], "gia_moi": {"VN122": 2050000}, "ngan_sach": 6}}, "runs": [{"kich_ban": "chuan", "mau": "react", "kieu": "Đạt mục tiêu", "dat": true, "goi_model": 8, "goi_tool": 7, "bi_chan": 1, "token": 1894, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["[ 1] search_flights(origin='SGN', dest='DAD', date='07/10') → {\"status\": \"invalid_param\", \"param\": \"date\", \"hint\": \"Dùng YYYY-MM-DD, ví dụ 2026-10-07\"}", "[ 2] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 3] check_seat(flight='QH118') → {\"status\": \"ok\", \"flight\": \"QH118\", \"price\": 1640000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 4] book_seat(flight='QH118', seat='12A') → ✗ CHẶN {\"status\": \"denied\", \"flight\": \"QH118\", \"vi_pham\": [\"cất cánh 15:40, cần trước 12:00\"], \"hint\": \"Chọn chuyến k", "[ 5] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 1850000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 6] book_seat(flight='VN122', seat='12A') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN122\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"08:10\", \"", "[ 7] pay(code='BK001', method='corp_card') → {\"status\": \"ok\", \"code\": \"BK001\", \"paid\": true}", "[ 8] get_booking(code='BK001') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN122\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"08:10\", \""], "ket_luan": "Đã đặt VN122 ngày 2026-10-07 08:10, ghế 12A, mã BK001, 1.850.000đ · đã thanh toán, get_booking xác nhận."}, {"kich_ban": "chuan", "mau": "plan", "kieu": "Đạt mục tiêu", "dat": true, "goi_model": 6, "goi_tool": 5, "bi_chan": 0, "token": 1128, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 1850000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 3] book_seat(flight='VN122', seat='12A') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN122\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"08:10\", \"", "[ 4] pay(code='BK001', method='corp_card') → {\"status\": \"ok\", \"code\": \"BK001\", \"paid\": true}", "[ 5] get_booking(code='BK001') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN122\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"08:10\", \""], "ket_luan": "Đã đặt VN122 ngày 2026-10-07 08:10, ghế 12A, mã BK001, 1.850.000đ · đã thanh toán, get_booking xác nhận."}, {"kich_ban": "chuan", "mau": "lai", "kieu": "Đạt mục tiêu", "dat": true, "goi_model": 6, "goi_tool": 5, "bi_chan": 0, "token": 1128, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 1850000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 3] book_seat(flight='VN122', seat='12A') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN122\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"08:10\", \"", "[ 4] pay(code='BK001', method='corp_card') → {\"status\": \"ok\", \"code\": \"BK001\", \"paid\": true}", "[ 5] get_booking(code='BK001') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN122\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"08:10\", \""], "ket_luan": "Đã đặt VN122 ngày 2026-10-07 08:10, ghế 12A, mã BK001, 1.850.000đ · đã thanh toán, get_booking xác nhận."}, {"kich_ban": "doi_gia", "mau": "react", "kieu": "Đạt mục tiêu", "dat": true, "goi_model": 10, "goi_tool": 8, "bi_chan": 2, "token": 3062, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["[ 1] search_flights(origin='SGN', dest='DAD', date='07/10') → {\"status\": \"invalid_param\", \"param\": \"date\", \"hint\": \"Dùng YYYY-MM-DD, ví dụ 2026-10-07\"}", "[ 2] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 3] check_seat(flight='QH118') → {\"status\": \"ok\", \"flight\": \"QH118\", \"price\": 1640000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 4] book_seat(flight='QH118', seat='12A') → ✗ CHẶN {\"status\": \"denied\", \"flight\": \"QH118\", \"vi_pham\": [\"cất cánh 15:40, cần trước 12:00\"], \"hint\": \"Chọn chuyến k", "[ 5] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 2050000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 6] book_seat(flight='VN122', seat='12A') → ✗ CHẶN {\"status\": \"denied\", \"flight\": \"VN122\", \"vi_pham\": [\"giá 2.050.000đ vượt trần 2.000.000đ\"], \"hint\": \"Chọn chuy", "[ 7] check_seat(flight='VN126') → {\"status\": \"ok\", \"flight\": \"VN126\", \"price\": 1880000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 8] book_seat(flight='VN126', seat='12A') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN126\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"11:20\", \"", "[ 9] pay(code='BK001', method='corp_card') → {\"status\": \"ok\", \"code\": \"BK001\", \"paid\": true}", "[10] get_booking(code='BK001') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN126\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"11:20\", \""], "ket_luan": "Đã đặt VN126 ngày 2026-10-07 11:20, ghế 12A, mã BK001, 1.880.000đ · đã thanh toán, get_booking xác nhận."}, {"kich_ban": "doi_gia", "mau": "plan", "kieu": "Kế hoạch hỏng", "dat": false, "goi_model": 4, "goi_tool": 2, "bi_chan": 0, "token": 578, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 2050000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "     ⚠ bước 3 cần book_seat, executor đề xuất check_seat → lệch kế hoạch"], "ket_luan": "DỪNG · PLAN · bước 3 cần book_seat nhưng không còn làm được (check_seat)\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VN122')→ok\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 4, 'goi_tool': 2, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Lập kế hoạch mới (chuyến khác), hay nới ràng buộc?"}, {"kich_ban": "doi_gia", "mau": "lai", "kieu": "Đạt mục tiêu", "dat": true, "goi_model": 9, "goi_tool": 6, "bi_chan": 0, "token": 2076, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 2050000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "     ⚠ bước 3 cần book_seat, executor đề xuất check_seat → lệch kế hoạch", "KẾ HOẠCH LẠI: check_seat → book_seat → pay → get_booking", "[ 3] check_seat(flight='VN126') → {\"status\": \"ok\", \"flight\": \"VN126\", \"price\": 1880000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 4] book_seat(flight='VN126', seat='12A') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN126\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"11:20\", \"", "[ 5] pay(code='BK001', method='corp_card') → {\"status\": \"ok\", \"code\": \"BK001\", \"paid\": true}", "[ 6] get_booking(code='BK001') → {\"status\": \"ok\", \"code\": \"BK001\", \"flight\": \"VN126\", \"seat\": \"12A\", \"date\": \"2026-10-07\", \"depart\": \"11:20\", \""], "ket_luan": "Đã đặt VN126 ngày 2026-10-07 11:20, ghế 12A, mã BK001, 1.880.000đ · đã thanh toán, get_booking xác nhận."}, {"kich_ban": "can_duyet", "mau": "react", "kieu": "Cần con người", "dat": false, "goi_model": 4, "goi_tool": 3, "bi_chan": 0, "token": 483, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["[ 1] search_flights(origin='SGN', dest='DAD', date='07/10') → {\"status\": \"invalid_param\", \"param\": \"date\", \"hint\": \"Dùng YYYY-MM-DD, ví dụ 2026-10-07\"}", "[ 2] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 3] check_seat(flight='VJ604') → {\"status\": \"ok\", \"flight\": \"VJ604\", \"price\": 1390000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 4] book_seat(flight='VJ604', seat='12A')  ✋ cần duyệt: vé không hoàn"], "ket_luan": "DỪNG · APPROVAL · book_seat VJ604: vé không hoàn\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='07/10')→invalid_param | search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VJ604')→ok\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 4, 'goi_tool': 3, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Duyệt đặt VJ604 06:05 giá 1.390.000đ (vé không hoàn) không?"}, {"kich_ban": "can_duyet", "mau": "plan", "kieu": "Cần con người", "dat": false, "goi_model": 4, "goi_tool": 2, "bi_chan": 0, "token": 540, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VJ604') → {\"status\": \"ok\", \"flight\": \"VJ604\", \"price\": 1390000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 3] book_seat(flight='VJ604', seat='12A')  ✋ cần duyệt: vé không hoàn"], "ket_luan": "DỪNG · APPROVAL · book_seat VJ604: vé không hoàn\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VJ604')→ok\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 4, 'goi_tool': 2, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Duyệt đặt VJ604 06:05 giá 1.390.000đ (vé không hoàn) không?"}, {"kich_ban": "can_duyet", "mau": "lai", "kieu": "Cần con người", "dat": false, "goi_model": 4, "goi_tool": 2, "bi_chan": 0, "token": 540, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VJ604') → {\"status\": \"ok\", \"flight\": \"VJ604\", \"price\": 1390000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 3] book_seat(flight='VJ604', seat='12A')  ✋ cần duyệt: vé không hoàn"], "ket_luan": "DỪNG · APPROVAL · book_seat VJ604: vé không hoàn\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VJ604')→ok\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 4, 'goi_tool': 2, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Duyệt đặt VJ604 06:05 giá 1.390.000đ (vé không hoàn) không?"}, {"kich_ban": "loi_dich_vu", "mau": "react", "kieu": "Phát hiện lặp", "dat": false, "goi_model": 4, "goi_tool": 3, "bi_chan": 0, "token": 485, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["[ 1] search_flights(origin='SGN', dest='DAD', date='07/10') → {\"status\": \"invalid_param\", \"param\": \"date\", \"hint\": \"Dùng YYYY-MM-DD, ví dụ 2026-10-07\"}", "[ 2] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 3] check_seat(flight='QH118') → {\"status\": \"error\", \"error\": \"timeout\", \"hint\": \"Dịch vụ kiểm tra ghế đang lỗi, thử lại sau\"}", "[ 4] check_seat(flight='QH118')  ✋ LOOP · 'check_seat' gọi 2 lần với cùng tham số trong 6 vòng gần nhất"], "ket_luan": "DỪNG · LOOP · 'check_seat' gọi 2 lần với cùng tham số trong 6 vòng gần nhất\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='07/10')→invalid_param | search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='QH118')→error\n  Trạng thái     : {'tien_trien': '1/5 chặng', 'goi_model': 4, 'goi_tool': 3, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : check_seat không cho kết quả mới. Thử lại sau, hay chuyển nhân viên đặt thủ công?"}, {"kich_ban": "loi_dich_vu", "mau": "plan", "kieu": "Kế hoạch hỏng", "dat": false, "goi_model": 3, "goi_tool": 2, "bi_chan": 0, "token": 329, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"error\", \"error\": \"timeout\", \"hint\": \"Dịch vụ kiểm tra ghế đang lỗi, thử lại sau\"}"], "ket_luan": "DỪNG · PLAN · check_seat → {\"status\": \"error\", \"error\": \"timeout\", \"hint\": \"Dịch vụ kiểm tra ghế đang lỗi, thử lại sau\"}\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VN122')→error\n  Trạng thái     : {'tien_trien': '1/5 chặng', 'goi_model': 3, 'goi_tool': 2, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Lập kế hoạch mới (chuyến khác), hay nới ràng buộc?"}, {"kich_ban": "loi_dich_vu", "mau": "lai", "kieu": "Phát hiện lặp", "dat": false, "goi_model": 5, "goi_tool": 2, "bi_chan": 0, "token": 816, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"error\", \"error\": \"timeout\", \"hint\": \"Dịch vụ kiểm tra ghế đang lỗi, thử lại sau\"}", "KẾ HOẠCH LẠI: check_seat → book_seat → pay → get_booking", "[ 3] check_seat(flight='VN122')  ✋ LOOP · 'check_seat' gọi 2 lần với cùng tham số trong 6 vòng gần nhất"], "ket_luan": "DỪNG · LOOP · 'check_seat' gọi 2 lần với cùng tham số trong 6 vòng gần nhất\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VN122')→error\n  Trạng thái     : {'tien_trien': '1/5 chặng', 'goi_model': 5, 'goi_tool': 2, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : check_seat không cho kết quả mới. Thử lại sau, hay chuyển nhân viên đặt thủ công?"}, {"kich_ban": "ngan_sach", "mau": "react", "kieu": "Hết ngân sách", "dat": false, "goi_model": 6, "goi_tool": 4, "bi_chan": 2, "token": 1156, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["[ 1] search_flights(origin='SGN', dest='DAD', date='07/10') → {\"status\": \"invalid_param\", \"param\": \"date\", \"hint\": \"Dùng YYYY-MM-DD, ví dụ 2026-10-07\"}", "[ 2] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 3] check_seat(flight='QH118') → {\"status\": \"ok\", \"flight\": \"QH118\", \"price\": 1640000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 4] book_seat(flight='QH118', seat='12A') → ✗ CHẶN {\"status\": \"denied\", \"flight\": \"QH118\", \"vi_pham\": [\"cất cánh 15:40, cần trước 12:00\"], \"hint\": \"Chọn chuyến k", "[ 5] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 2050000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "[ 6] book_seat(flight='VN122', seat='12A') → ✗ CHẶN {\"status\": \"denied\", \"flight\": \"VN122\", \"vi_pham\": [\"giá 2.050.000đ vượt trần 2.000.000đ\"], \"hint\": \"Chọn chuy"], "ket_luan": "DỪNG · BUDGET · đã dùng 6/6 lần gọi model\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='07/10')→invalid_param | search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='QH118')→ok | book_seat(flight='QH118', seat='12A')→denied | check_seat(flight='VN122')→ok | book_seat(flight='VN122', seat='12A')→denied\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 6, 'goi_tool': 4, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Nới ràng buộc (giờ bay, giá) hay tăng ngân sách?"}, {"kich_ban": "ngan_sach", "mau": "plan", "kieu": "Kế hoạch hỏng", "dat": false, "goi_model": 4, "goi_tool": 2, "bi_chan": 0, "token": 578, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 2050000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "     ⚠ bước 3 cần book_seat, executor đề xuất check_seat → lệch kế hoạch"], "ket_luan": "DỪNG · PLAN · bước 3 cần book_seat nhưng không còn làm được (check_seat)\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VN122')→ok\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 4, 'goi_tool': 2, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Lập kế hoạch mới (chuyến khác), hay nới ràng buộc?"}, {"kich_ban": "ngan_sach", "mau": "lai", "kieu": "Hết ngân sách", "dat": false, "goi_model": 6, "goi_tool": 3, "bi_chan": 0, "token": 1088, "ve_sai": 0, "giu_cho_treo": 0, "trace": ["KẾ HOẠCH: search_flights → check_seat → book_seat → pay → get_booking", "[ 1] search_flights(origin='SGN', dest='DAD', date='2026-10-07') → {\"status\": \"ok\", \"flights\": [{\"flight\": \"QH118\", \"depart\": \"15:40\", \"price\": 1640000, \"refundable\": true}, {\"f", "[ 2] check_seat(flight='VN122') → {\"status\": \"ok\", \"flight\": \"VN122\", \"price\": 2050000, \"seats\": [\"12A\", \"12B\", \"14C\"]}", "     ⚠ bước 3 cần book_seat, executor đề xuất check_seat → lệch kế hoạch", "KẾ HOẠCH LẠI: check_seat → book_seat → pay → get_booking", "[ 3] check_seat(flight='VN126') → {\"status\": \"ok\", \"flight\": \"VN126\", \"price\": 1880000, \"seats\": [\"12A\", \"12B\", \"14C\"]}"], "ket_luan": "DỪNG · BUDGET · đã dùng 6/6 lần gọi model\n  Đã thử         : search_flights(origin='SGN', dest='DAD', date='2026-10-07')→ok | check_seat(flight='VN122')→ok | check_seat(flight='VN126')→ok\n  Trạng thái     : {'tien_trien': '2/5 chặng', 'goi_model': 6, 'goi_tool': 3, 'tac_dung_phu': 'không'}\n  Hỏi người dùng : Nới ràng buộc (giờ bay, giá) hay tăng ngân sách?"}]};
+const MAU = { react: "ReAct", plan: "Plan-then-Execute", lai: "Lai" };
+const KB = {
+  chuan: ["Chuẩn", "Chỉ VN122 thoả mọi ràng buộc."],
+  doi_gia: ["Đổi giá", "VN122 tăng giá lúc kiểm ghế."],
+  can_duyet: ["Cần duyệt", "Chuyến hợp lệ duy nhất là vé không hoàn."],
+  loi_dich_vu: ["Lỗi dịch vụ", "check_seat luôn timeout."],
+  ngan_sach: ["Ngân sách 6", "Như Đổi giá, chỉ 6 lần gọi model."],
+};
+const TONE = { "Đạt mục tiêu": "t-ok", "Cần con người": "t-human", "Phát hiện lặp": "t-bad", "Hết ngân sách": "t-warn", "Kế hoạch hỏng": "t-warn", "Bế tắc": "t-bad", "Chưa đạt mục tiêu": "t-bad", "Kế hoạch không hợp lệ": "t-bad" };
+const vnd = x => x.toLocaleString("vi-VN") + "đ";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const $ = id => document.getElementById(id);
+let cur = { kb: "doi_gia", mau: "react" }, timer = null;
+
+// --- header
+$("ask").textContent = "“" + D.cau_hoi + "”";
+$("chips").innerHTML = [
+  ["Ngày", D.rb.date], ["Cất cánh trước", D.rb.depart_before], ["Trần giá", vnd(D.rb.max_price)],
+  ["Tự duyệt tới", vnd(D.han_muc) + " · vé hoàn được"],
+].map(([k, v]) => `<span class="chip">${k} <b>${v}</b></span>`).join("");
+
+// --- bộ chọn
+$("scen").innerHTML = Object.entries(KB).map(([k, [t, d]]) =>
+  `<button type="button" data-kb="${k}"><span class="mono">${t}</span><small>${d}</small></button>`).join("");
+$("seg").innerHTML = Object.entries(MAU).map(([k, t]) => `<button type="button" data-mau="${k}">${t}</button>`).join("");
+$("scen").onclick = e => { const b = e.target.closest("button"); if (b) select(b.dataset.kb, cur.mau); };
+$("seg").onclick = e => { const b = e.target.closest("button"); if (b) select(cur.kb, b.dataset.mau); };
+
+function xet(f, gia) {
+  if (f.depart >= D.rb.depart_before) return ["Sau " + D.rb.depart_before, "t-bad"];
+  if (gia > D.rb.max_price) return ["Vượt trần", "t-bad"];
+  if (!f.refundable || gia > D.han_muc) return ["Cần duyệt", "t-human"];
+  return ["Hợp lệ", "t-ok"];
+}
+
+function board(kb) {
+  const k = D.kich_ban[kb], moi = k.gia_moi || {};
+  $("board").innerHTML = k.chuyen.map(code => {
+    const f = D.chuyen[code], gia = moi[code] ?? f.price, [t, c] = xet(f, gia);
+    const price = moi[code] ? `<s>${vnd(f.price)}</s> ${vnd(gia)}` : vnd(gia);
+    return `<tr><td class="fl">${code}</td><td>${f.depart}</td><td class="num">${price}</td><td>${f.refundable ? "có" : "không"}</td><td><span class="pill ${c}">${t}</span></td></tr>`;
+  }).join("");
+  const notes = [];
+  if (k.gia_moi) notes.push("Giá gạch là giá lúc search_flights; giá mới chỉ hiện ra khi gọi check_seat.");
+  if (k.timeout) notes.push("Dịch vụ check_seat đang sập: mọi lần gọi trả timeout.");
+  if (k.ngan_sach) notes.push(`Ngân sách bị hạ xuống ${k.ngan_sach} lần gọi model.`);
+  $("board-note").textContent = notes.join(" ");
+  $("board-tag").textContent = KB[kb][0];
+}
+
+// --- trace
+function parse(line) {
+  let m;
+  if ((m = line.match(/^KẾ HOẠCH( LẠI)?: (.*)$/)))
+    return { kind: "plan", again: !!m[1], steps: m[2].split(" → ") };
+  if ((m = line.match(/^\s*⚠ (.*)$/))) return { kind: "warn", text: m[1] };
+  if ((m = line.match(/^\[\s*(\d+)\] (\w+)\((.*?)\)\s+✋ (.*)$/))) return { kind: "stop", n: m[1], tool: m[2], args: m[3], text: m[4] };
+  if ((m = line.match(/^\[\s*(\d+)\] (\w+)\((.*?)\) → (✗ CHẶN )?(.*)$/))) {
+    const st = (m[5].match(/"status": "(\w+)"/) || [])[1] || "?";
+    return { kind: "tool", n: m[1], tool: m[2], args: m[3], blocked: !!m[4], status: st, obs: m[5] };
+  }
+  return { kind: "raw", text: line };
+}
+
+function row(p) {
+  if (p.kind === "plan")
+    return `<li class="plan"><span class="n">${p.again ? "↻" : "▤"}</span><div class="what"><span class="pill t-mute">${p.again ? "Lập lại kế hoạch" : "Kế hoạch"}</span><span class="steps">${p.steps.map(s => `<span>${s}</span>`).join("<i>→</i>")}</span></div></li>`;
+  if (p.kind === "warn")
+    return `<li><span class="n">!</span><div class="what"><span class="pill t-warn">Lệch kế hoạch</span></div><div class="why">${esc(p.text)}</div></li>`;
+  if (p.kind === "stop") {
+    const human = /cần duyệt/.test(p.text);
+    return `<li><span class="n">${p.n}</span><div class="what"><span class="call"><b>${p.tool}</b>(${esc(p.args)})</span><span class="pill ${human ? "t-human" : "t-bad"}">${human ? "Dừng chờ duyệt" : "Harness dừng"}</span></div><div class="why">${esc(p.text)} · tool không được thực thi.</div></li>`;
+  }
+  if (p.kind === "tool") {
+    const pill = p.blocked ? `<span class="pill t-bad">Harness chặn</span>`
+      : p.status === "ok" ? `<span class="pill t-ok">ok</span>` : `<span class="pill t-warn">${esc(p.status)}</span>`;
+    return `<li><span class="n">${p.n}</span><div class="what"><span class="call"><b>${p.tool}</b>(${esc(p.args)})</span>${pill}</div><div class="obs">${esc(p.obs)}</div></li>`;
+  }
+  return `<li><span class="n"></span><div class="obs">${esc(p.text)}</div></li>`;
+}
+
+function outcome(r) {
+  const tone = TONE[r.kieu] || "t-mute", el = $("outcome");
+  el.className = "outcome " + tone;
+  if (!r.ket_luan.startsWith("DỪNG")) {
+    el.innerHTML = `<span class="label">Kết thúc bình thường · tiêu chí hoàn thành kiểm bằng code</span><h3>${r.kieu}</h3><p>${esc(r.ket_luan)}</p>`;
+    return;
+  }
+  const lines = r.ket_luan.split("\n"), get = k => (lines.find(l => l.trim().startsWith(k)) || "").split(": ").slice(1).join(": ");
+  const normal = r.kieu === "Cần con người";
+  el.innerHTML = `<span class="label">${normal ? "Dừng bình thường" : "Dừng bất thường"} · gói bàn giao</span><h3>${r.kieu}</h3>
+    <dl><dt>Lý do</dt><dd class="mono">${esc(lines[0].replace("DỪNG · ", ""))}</dd>
+    <dt>Đã thử</dt><dd class="mono">${esc(get("Đã thử")).replaceAll(" | ", "<br>")}</dd>
+    <dt>Trạng thái</dt><dd class="mono">${esc(get("Trạng thái"))}</dd>
+    <dt>Hỏi người</dt><dd><b>${esc(get("Hỏi người dùng"))}</b></dd></dl>`;
+}
+
+function run() { return D.runs.find(r => r.kich_ban === cur.kb && r.mau === cur.mau); }
+
+function select(kb, mau) {
+  cur = { kb, mau };
+  stop();
+  document.querySelectorAll("#scen button").forEach(b => b.setAttribute("aria-pressed", b.dataset.kb === kb));
+  document.querySelectorAll("#seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mau === mau));
+  document.querySelectorAll("#matrix td.cell").forEach(td => td.classList.toggle("sel", td.dataset.kb === kb && td.dataset.mau === mau));
+  const r = run();
+  board(kb);
+  $("trace-title").textContent = "Trace · " + MAU[mau];
+  $("trace-tag").textContent = `${r.trace.filter(l => /^\[/.test(l)).length} lời gọi tool`;
+  $("trace").innerHTML = r.trace.map(l => row(parse(l))).join("");
+  outcome(r);
+  $("metrics").innerHTML = [["Gọi model", r.goi_model], ["Gọi tool", r.goi_tool], ["Harness chặn", r.bi_chan], ["Token ~", r.token.toLocaleString("vi-VN")]]
+    .map(([k, v]) => `<div class="metric"><span class="label">${k}</span><b>${v}</b></div>`).join("");
+}
+
+// --- phát lại
+function stop() { clearInterval(timer); timer = null; document.querySelectorAll("#trace li").forEach(li => li.classList.remove("pending", "now")); $("outcome").hidden = false; }
+$("all").onclick = stop;
+$("play").onclick = () => {
+  stop();
+  const lis = [...document.querySelectorAll("#trace li")];
+  lis.forEach(li => li.classList.add("pending"));
+  $("outcome").hidden = true;
+  let i = 0;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  timer = setInterval(() => {
+    lis.forEach(li => li.classList.remove("now"));
+    if (i < lis.length) { lis[i].classList.remove("pending"); lis[i].classList.add("now"); i++; }
+    else stop();
+  }, reduce ? 150 : 650);
+};
+
+// --- ma trận + tổng kết
+$("matrix").innerHTML = Object.keys(KB).map(kb => `<tr><th scope="row"><span class="mono">${KB[kb][0]}</span></th>` +
+  Object.keys(MAU).map(mau => {
+    const r = D.runs.find(x => x.kich_ban === kb && x.mau === mau);
+    return `<td class="cell" data-kb="${kb}" data-mau="${mau}" tabindex="0"><span class="pill ${TONE[r.kieu] || "t-mute"}">${r.kieu}</span><span class="sub">${r.goi_model} model · ${r.token.toLocaleString("vi-VN")} token</span></td>`;
+  }).join("") + "</tr>").join("");
+$("matrix").onclick = e => { const td = e.target.closest("td.cell"); if (td) { select(td.dataset.kb, td.dataset.mau); $("trace").scrollIntoView({ behavior: "smooth", block: "start" }); } };
+$("matrix").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { const td = e.target.closest("td.cell"); if (td) { e.preventDefault(); select(td.dataset.kb, td.dataset.mau); } } };
+
+function bars(id, title, key) {
+  const tot = Object.keys(MAU).map(m => [m, D.runs.filter(r => r.mau === m).reduce((s, r) => s + r[key], 0)]);
+  const max = Math.max(...tot.map(t => t[1]));
+  const dat = m => D.runs.filter(r => r.mau === m && ["chuan", "doi_gia"].includes(r.kich_ban) && r.dat).length;
+  $(id).innerHTML = `<span class="label">${title}</span>` + tot.map(([m, v]) =>
+    `<div class="bar"><span>${MAU[m]}${key === "token" ? ` <span class="pill ${dat(m) === 2 ? "t-ok" : "t-warn"}">đạt ${dat(m)}/2</span>` : ""}</span><div class="track"><div class="fill" style="width:${(v / max * 100).toFixed(1)}%"></div></div><span class="v">${v.toLocaleString("vi-VN")}</span></div>`).join("");
+}
+bars("bars-token", "Tổng token ước lượng (5 kịch bản)", "token");
+bars("bars-model", "Tổng lần gọi model (5 kịch bản)", "goi_model");
+
+select(cur.kb, cur.mau);
+</script>
